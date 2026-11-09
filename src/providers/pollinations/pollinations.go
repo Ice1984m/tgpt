@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	http "github.com/bogdanfinn/fhttp"
@@ -24,37 +25,62 @@ func NewRequest(input string, params structs.Params) (*http.Response, error) {
 		model = params.ApiModel
 	}
 
-	temperature := "0.6"
+	temperature := 0.6
 	if params.Temperature != "" {
-		temperature = params.Temperature
+		if parsedTemp, err := strconv.ParseFloat(params.Temperature, 64); err == nil {
+			temperature = parsedTemp
+		}
 	}
 
-	top_p := "1"
+	top_p := 1.0
 	if params.Top_p != "" {
-		top_p = params.Top_p
+		if parsedTopP, err := strconv.ParseFloat(params.Top_p, 64); err == nil {
+			top_p = parsedTopP
+		}
 	}
 
-	safeInput, _ := json.Marshal(input)
-
-	var data = strings.NewReader(fmt.Sprintf(`{
-		"messages": [
-			{
-				"content": "%s",
-				"role": "system"
-			},
-			%v
-			{
-				"content": %v,
-				"role": "user"
-			}
-		],
-		"model": "%v",
-		"stream": true,
-		"temperature": %v,
-		"top_p": %v,
-		"referrer": "tgpt"
+	type pollinationsMessage struct {
+		Content string `json:"content"`
+		Role    string `json:"role"`
 	}
-	`, params.SystemPrompt, params.PrevMessages, string(safeInput), model, temperature, top_p))
+
+	type pollinationsRequest struct {
+		Messages    []pollinationsMessage `json:"messages"`
+		Model       string               `json:"model"`
+		Stream      bool                 `json:"stream"`
+		Temperature float64              `json:"temperature"`
+		TopP        float64              `json:"top_p"`
+		Referrer    string               `json:"referrer"`
+	}
+
+	messages := []pollinationsMessage{
+		{
+			Content: params.SystemPrompt,
+			Role:    "system",
+		},
+		{
+			Content: input,
+			Role:    "user",
+		},
+	}
+
+	reqBody := pollinationsRequest{
+		Messages:    messages,
+		Model:       model,
+		Stream:      true,
+		Temperature: temperature,
+		TopP:        top_p,
+		Referrer:    "tgpt",
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		fmt.Println("\nFailed to marshal request body.")
+		fmt.Println("Error:", err)
+		os.Exit(0)
+	}
+
+	var data = strings.NewReader(string(bodyBytes))
 
 	req, err := http.NewRequest("POST", "https://text.pollinations.ai/openai", data)
 	if err != nil {
